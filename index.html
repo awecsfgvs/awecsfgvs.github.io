@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>改一行 base_url：我把项目的 API 全迁到了一个中转站</title>
+<meta name="description" content="一份 OpenAI 兼容 API 中转站的真实使用记录：接入成本、多模型切换、按量计费，以及它不适合谁。">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0b0e13; --bg2:#11161f; --card:#151b26; --line:#232c3b;
+    --txt:#e8edf5; --dim:#93a0b4; --acc:#4f8cff; --acc2:#22d3a6;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:16px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:0 0 80px;
+  }
+  .glow{position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(60vw 40vw at 15% -10%, rgba(79,140,255,.20), transparent 60%),
+      radial-gradient(50vw 35vw at 95% 8%, rgba(34,211,166,.13), transparent 60%);
+  }
+  .wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:0 22px}
+
+  header{padding:64px 0 40px;text-align:left}
+  .kicker{display:inline-block;font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--acc2);border:1px solid rgba(34,211,166,.35);border-radius:999px;
+    padding:5px 13px;margin-bottom:22px;background:rgba(34,211,166,.07)}
+  h1{font-size:clamp(27px,5.2vw,40px);line-height:1.28;font-weight:800;letter-spacing:-.02em}
+  h1 em{font-style:normal;background:linear-gradient(100deg,var(--acc),var(--acc2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{margin-top:18px;color:var(--dim);font-size:17px;max-width:34em}
+
+  article p{margin:20px 0;color:#cfd8e6}
+  article p strong{color:#fff;font-weight:650}
+  h2{font-size:20px;margin:44px 0 6px;font-weight:750;letter-spacing:-.01em;
+    display:flex;align-items:center;gap:10px}
+  h2::before{content:"";width:4px;height:19px;border-radius:2px;
+    background:linear-gradient(var(--acc),var(--acc2));display:inline-block}
+
+  .grid{display:grid;gap:14px;margin:22px 0}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));
+    border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .card h3{font-size:15.5px;margin-bottom:6px;font-weight:700}
+  .card h3 span{color:var(--acc2);margin-right:7px;font-variant-numeric:tabular-nums}
+  .card p{margin:0;font-size:14.6px;color:var(--dim);line-height:1.75}
+
+  pre{background:#0a0e15;border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;overflow-x:auto;margin:18px 0;font-size:13.5px;line-height:1.7}
+  code{font-family:"SF Mono",Menlo,Consolas,"Courier New",monospace}
+  pre .c{color:#5e6b80}
+  pre .s{color:#9ae6b4}
+  pre .k{color:#8ab4ff}
+  .add{color:#22d3a6}
+  .del{color:#ff7b72}
+
+  .note{background:rgba(255,255,255,.03);border:1px solid var(--line);
+    border-left:3px solid #ffb454;border-radius:0 12px 12px 0;padding:16px 20px;margin:24px 0}
+  .note h4{font-size:14.5px;margin-bottom:8px;color:#ffcf8b;font-weight:700}
+  .note ul{list-style:none;font-size:14.4px;color:var(--dim)}
+  .note li{padding-left:16px;position:relative;margin:7px 0}
+  .note li::before{content:"–";position:absolute;left:0;color:#5e6b80}
+
+  .cta{text-align:center;margin:52px 0 10px;padding:34px 24px;border-radius:18px;
+    background:linear-gradient(160deg,rgba(79,140,255,.16),rgba(34,211,166,.09));
+    border:1px solid rgba(79,140,255,.3)}
+  .cta p{margin:0 0 6px;color:var(--dim);font-size:14.5px}
+  .btn{display:inline-block;border:0;cursor:pointer;font-family:inherit;margin:16px 0 12px;padding:14px 34px;border-radius:11px;
+    background:linear-gradient(100deg,var(--acc),#3a6fe0);color:#fff;text-decoration:none;
+    font-weight:700;font-size:16px;box-shadow:0 10px 28px -10px rgba(79,140,255,.85);
+    transition:transform .15s ease,box-shadow .15s ease}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 16px 34px -12px rgba(79,140,255,.95)}
+  .url{font-size:12.5px;color:#6f7d92;word-break:break-all;margin-top:10px}
+  .url code{color:#8fa0b8}
+
+  .copy{margin-top:14px;background:none;border:1px solid var(--line);color:var(--dim);
+    padding:8px 16px;border-radius:9px;font-size:13px;cursor:pointer;font-family:inherit}
+  .copy:hover{color:var(--txt);border-color:#37465c}
+  .alt{margin:14px 0 0;font-size:12.8px;color:#6f7d92;line-height:1.8}
+  .alt a{color:#8fb6ff;text-decoration:none;border-bottom:1px solid rgba(143,182,255,.35);word-break:break-all}
+  .alt a:hover{color:#b9d0ff}
+
+  footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);
+    color:#5e6b80;font-size:12.8px;line-height:1.9}
+  @media (max-width:520px){
+    header{padding:44px 0 30px}
+    .cta{padding:26px 18px}
+    .btn{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap">
+
+  <header>
+    <span class="kicker">接入记录 / API 中转</span>
+    <h1>改一行 <em>base_url</em><br>我把项目的 API 全迁到了一个中转站</h1>
+    <p class="lede">同一份代码，改一行 base_url。多模型一个入口，按量计费，五分钟跑通第一个请求。也有它不适合的场景——都写在下面。</p>
+  </header>
+
+  <article>
+
+    <p>写代码的人大概都有过这种经历：项目跑通了，卡在最后一步——调模型。</p>
+
+    <p>不是不会写，是链路太脏。账号要走流程，额度审批排队等半天；网络时通时断，重试逻辑写得比业务代码还长；换个模型要从头读一遍文档，SDK 参数名字对不上，改到怀疑人生。最气的是你好不容易把 A 家的接口调顺了，想试试 B 家的效果，发现自己又得重写一遍请求层。</p>
+
+    <p>前后折腾了小半年，试过直连、试过自建代理、试过让朋友代付，最后落地的方案其实很朴素：<strong>把所有请求收敛到同一个 OpenAI 兼容的入口上</strong>。</p>
+
+    <h2>改动只有一行</h2>
+
+    <p>如果你的项目本来就在用 OpenAI 那套协议，迁移成本基本为零：</p>
+
+<pre><code><span class="c"># 之前</span>
+<span class="k">base_url</span> = <span class="s">"https://api.openai.com/v1"</span>
+
+<span class="c"># 现在</span>
+<span class="k">base_url</span> = <span class="s">"https://你的中转站域名/v1"</span></code></pre>
+
+    <p>key 换掉，模型名按站点文档填，跑起来。LangChain、LlamaIndex、Dify、Cherry Studio、Chatbox、One API 这类工具基本都支持自定义 base_url，填进去就能用，业务代码一行不用动。</p>
+
+    <h2>四点真实体感</h2>
+
+    <div class="grid">
+      <div class="card">
+        <h3><span>01</span>注册到跑通，五分钟</h3>
+        <p>拿 key、改一行 base_url、发第一个请求，中间没有等待审批的环节。对"先跑通再说"的场景，启动成本比参数表重要——省下来的时间都写业务了。</p>
+      </div>
+      <div class="card">
+        <h3><span>02</span>多模型一个入口，切换是改字符串</h3>
+        <p>同一个 key、同一个地址，模型名写哪个就跑哪个。做对比测试时特别爽：同一段 prompt 丢给三个模型，代码一行不用改，只看输出。</p>
+      </div>
+      <div class="card">
+        <h3><span>03</span>按量计费，没有月费绑定</h3>
+        <p>用多少算多少。项目间歇性开发的时候不会白交钱，跑批处理任务时成本也可控，心里有数。</p>
+      </div>
+      <div class="card">
+        <h3><span>04</span>工具链零适配</h3>
+        <p>所有认自定义 base_url 的客户端、插件、Agent 框架，填入地址即可。不用为每家模型写一套适配层。</p>
+      </div>
+    </div>
+
+    <h2>也说清楚它不适合谁</h2>
+
+    <p>软文全是好话就没人信了，所以这几点必须摆出来：</p>
+
+    <div class="note">
+      <h4>使用前三件事</h4>
+      <ul>
+        <li><strong>中转不是官方直连。</strong>稳定性和模型版本取决于站方的上游，重要生产系统请自己做降级和重试，别把鸡蛋放一个篮子。</li>
+        <li><strong>计费倍率、可用模型、限流策略各家差别很大。</strong>选之前看清楚页面说明，别拿别人的截图当自己的预期。</li>
+        <li><strong>涉及敏感数据的场景，先确认数据处理策略。</strong>这一点比省钱重要得多。</li>
+      </ul>
+    </div>
+
+    <p><strong>适合谁？</strong>个人开发者、小团队、做原型验证的、需要多模型对比的、公司报销流程太慢自己先垫钱把活干了的。</p>
+
+    <p>如果你有稳定的海外资源和采购渠道，官方直连当然更省心；但如果你只是想"今天就把这个东西跑起来"，中转站是最短路径。</p>
+
+    <div class="cta">
+      <p>注册有体验额度，先白嫖一轮再决定要不要充值，不吃亏</p>
+      <button class="btn" id="copyBtn2" type="button">复制邀请码 J83SY6B6R9WF</button>
+      <div class="url">邀请码 <code id="aff">J83SY6B6R9WF</code>（注册时填入「邀请码」框）</div>
+      <button class="copy" id="copyBtn" type="button">复制邀请码</button>
+    </div>
+
+    <p style="margin-top:38px;color:var(--dim)">折腾链路的时间，还是拿去做产品比较划算。</p>
+
+  </article>
+
+  <footer>
+    本文为个人使用记录，含邀请链接，注册后双方可获得站点提供的额度。文中不承诺任何价格与模型清单，一切以站点页面为准。<br>
+    更新于 <span id="d"></span>
+  </footer>
+</div>
+
+<script>
+  document.getElementById('d').textContent = new Date().toLocaleDateString('zh-CN');
+  var btn = document.getElementById('copyBtn');
+  var btn2 = document.getElementById('copyBtn2');
+  var grab = function(){
+    navigator.clipboard.writeText('J83SY6B6R9WF').then(function(){
+      btn.textContent = '已复制 ✓'; btn2.textContent = '已复制 ✓';
+      setTimeout(function(){ btn.textContent = '复制邀请码'; btn2.textContent = '复制邀请码 J83SY6B6R9WF'; }, 1800);
+    }).catch(function(){ btn2.textContent = '长按邀请码手动复制'; });
+  };
+  btn2.addEventListener('click', grab);
+  btn.addEventListener('click', function(){
+    var t = "J83SY6B6R9WF";
+    navigator.clipboard.writeText(t).then(function(){
+      btn.textContent = '已复制 ✓';
+      setTimeout(function(){ btn.textContent = '复制邀请码'; }, 1800);
+    }).catch(function(){
+      btn.textContent = '长按上方链接复制';
+    });
+  });
+</script>
+</body>
+</html>
